@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Custom wrapper script that clears old data and runs the downloader for the new data
+
+echo "This will clear all ./structure_data/POSCAR*.vasp and ./structure_data/id_prop.csv"
+read -p "Proceed? [y/n]: " clear_all
+
+if [ $clear_all == "y" ]
+then
+    echo "Clearing directory...\n"
+else
+    echo "Canceling..."
+    exit 1
+fi
+
+rm structure_data/id_prop.csv
+rm structure_data/*.vasp
+
+echo "Downloading data from JARVIS..."
+
+python generate_data.py
+
+echo "Prepared! Run \"sbatch train.job\"!"
+exit 0
