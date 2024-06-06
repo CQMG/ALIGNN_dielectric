@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# The name of the job
+#SBATCH -J train-ALIGNN
+
+# Standard output file
+#SBATCH -o output.out
+
+# Email event info
+##SBATCH --mail-type=END,FAIL,BEGIN
+##SBATCH --mail-user=cjg00040@mix.wvu.edu
+
+# Number of compute nodes
+#SBATCH -N 1
+
+# Number of tasks
+#SBATCH -n 1
+
+# Partition for job (run sinfo to get info)
+#SBATCH -p gpu_2day
+
+# GPUs
+#SBATCH -G nvidia_a100:1
+
+# Time limit for job formatted as {days}-{hours}:{minutes}:{seconds}
+#SBATCH -t 8:00:00
+
+source $HOME/.bashrc
+
+nvidia-smi
+
+conda activate ALIGNN
+
+echo ""
+echo ""
+
+#  < Job below >
+
+train_alignn.py --root_dir "$PWD/structure_data" --config "$PWD/structure_data/config.json" --output_dir "$PWD/output_data"
+
+#  < --------- >
+
+echo ""
+echo "{JOB FINISHED}"
+echo ""
+echo "Job ID:              $SLURM_JOB_ID"
+echo "Job Name:            $SLURM_JOB_NAME"
+echo "Number of Nodes:     $SLURM_JOB_NUM_NODES"
+echo "Number of CPU cores: $SLURM_CPUS_ON_NODE"
+echo "Number of Tasks:     $SLURM_NTASKS"
+echo "Partition:           $SLURM_JOB_PARTITION"

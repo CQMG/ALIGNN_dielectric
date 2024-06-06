@@ -1,0 +1,2 @@
+config.json : Modified from https://github.com/usnistgov/alignn/blob/main/alignn/examples/sample_data/config_example.json
+generate_data.py : Modified from https://github.com/usnistgov/alignn/blob/main/alignn/examples/sample_data/scripts/generate_sample_data_reg.py
