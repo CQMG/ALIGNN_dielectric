@@ -2,7 +2,7 @@
 
 print("Loading, wait for \">\" prompt...")
 
-import traceback, json, sys
+import traceback, json, sys, os
 
 import torch
 from jarvis.core.atoms import Atoms
@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 
 class CommandParser:
     def __init__(self):
+        '''Initialization sets a number of default state variables, most of which are used by load_model and the plotting commands.'''
         self.ID_PROP_LOC = "structure_data/id_prop.csv"
         self.MODEL_LOC = "output_data/best_model.pt"
         self.CONFIG_LOC = "output_data/config.json"
@@ -32,7 +33,14 @@ class CommandParser:
 
         self.MODEL = None
 
-        self.QUICKPLOT_TEMPLATE_PLOTILLE = "{}:blue:_:dashed {}:red:?"
+        self.PART = None
+        cwd = os.getcwd().split("/")[-1]
+        if "REAL" in cwd: # Attempt to use the current working directory to decide whether this is a real or imaginary plot
+            self.PART = "REAL"
+        if "IMAG" in cwd:
+            self.PART = "IMAG"
+
+        self.QUICKPLOT_TEMPLATE_PLOTILLE = "{}:blue:_:dashed {}:red:?" # Alter the quickplot template here
         self.QUICKPLOT_TEMPLATE_IMG = "{}:black:_:dashed {}:red:?"
 
         id_prop_file = open(self.ID_PROP_LOC)
@@ -51,6 +59,7 @@ class CommandParser:
         self.POSCAR_LOC = new
     
     def load_model(self):
+        '''Loads the model from the configured state.'''
         if torch.cuda.is_available():
             self.DEVICE = torch.device("cuda")
         config = loadjson(self.CONFIG_LOC)
@@ -66,7 +75,10 @@ class CommandParser:
         print("  Device:\t" + str(self.DEVICE))
     
     def get_plot_data(self, queries, verbose=False):
-
+        """
+        Takes a list of queries and returns a tuple that encodes proper plotting info for Plotille or Matplotlib
+        Properly parses ? and queries the loaded model
+        """
         print(queries)
 
         Ylist = []
@@ -77,29 +89,29 @@ class CommandParser:
         for query in queries:
             cmpts = query.split(":")
 
-            if len(cmpts) > 2 and cmpts[2] == "?":
-                if self.MODEL == None:
+            if len(cmpts) > 2 and cmpts[2] == "?": # Detect the ? for querying the model
+                if self.MODEL == None: # Check if the model is available
                     print("Must call load_model first")
                     return None
                 ID = cmpts[0]
                 color = cmpts[1]
                 colors.append(color)
-                try:
+                try: # Detect if the ID is an integer and use that to select an index in the file
                     ID_int = int(ID)
                     ID_str = self.ID_PROP_LINES[ID_int].split(",")[0]
-                except ValueError:
+                except ValueError: # Otherwise, treat it as the filename
                     ID_str = ID
-                try:
+                try: # Attempt to open the requested model in the current working directory
                     atoms = Atoms.from_poscar(ID_str)
-                except FileNotFoundError:
-                    atoms = Atoms.from_poscar(self.POSCAR_LOC + ID_str)
+                except FileNotFoundError: # If it isn't there, look in the POSCAR_LOC, this allows the user to use POSCAR in current
+                    atoms = Atoms.from_poscar(self.POSCAR_LOC + ID_str) # working directory or from a downloaded database elsewhere
                 cvn = Spacegroup3D(atoms).conventional_standard_structure
                 
-                labels.append(ID_str + " (Predicted)")
-                if verbose:
+                labels.append(ID_str + " (Predicted)") # Make it clear on the plot that this is a prediction
+                if verbose: # Verbose is mostly for the automated_test
                     print("Processed " + ID_str + " (Predicted)")
 
-                try:
+                try: # Will detect and use a normalization divisor if it was used during data processing
                     f = open(self.NORM_DIV_LOC, 'r')
                     norm_div = float(f.readlines()[0])
                     f.close()
@@ -107,11 +119,12 @@ class CommandParser:
                 except Exception:
                     norm_div = 1.0
 
+                # Create the atom and line graphs, then evaluate the model 
                 g, lg = Graph.atom_dgl_multigraph(atoms)
                 Ylist.append(list(map(lambda x: x * norm_div, (self.MODEL([g.to(self.DEVICE), lg.to(self.DEVICE)]))["out"].detach().cpu().numpy().flatten().tolist())))
 
 
-            else:
+            else: # Not querying the model, just pulling downloaded data
                 ID = cmpts[0]
                 color = cmpts[1]
                 colors.append(color)
@@ -119,16 +132,16 @@ class CommandParser:
                     ID_int = int(ID)
                     label = self.ID_PROP_LINES[ID_int].split(",")[0]
                     labels.append(label)
-                    if verbose:
+                    if verbose: # Verbose is for automated_test
                         print("Processed " + label)
                     Ylist.append(self.get_sample_reference(self.ID_PROP_LINES, ID_int))
                 except ValueError:
                     Ylist.append(self.get_sample_reference_name(self.ID_PROP_LINES, ID))
                     labels.append(ID)
-                    if verbose:
+                    if verbose: # Verbose is for automated_test
                         print("Processed " + ID)
             
-            if len(cmpts) > 3:
+            if len(cmpts) > 3: # Process the style information from the input query
                 styles.append(cmpts[3])
             else:
                 styles.append("solid")
@@ -136,11 +149,17 @@ class CommandParser:
         return (Ylist, colors, styles, labels)
     
     def automated_test(self, test_file, out_file=None):
+        """
+        Perform an automated test with the structure identifiers in test_file
+        Optionally, output the results as JSON to out_file
+        """
         f = open(self.TEST_FILE_LOC + test_file)
         test_structs = list(map(lambda x: x.strip(), f.readlines()))
         f.close()
 
         queries = []
+        # This isn't the most elegant solution, but it reuses the get_plot_data code
+        # A high-throughput implementation would be much different
         for struct in test_structs:
             queries.append(struct + ":blue")
             queries.append(struct + ":red:?")
@@ -155,6 +174,7 @@ class CommandParser:
         best = 0
         worst = 0
 
+        # Print and prep for JSON creation
         for i in range(0, int(len(Ylist) / 2)):
             real = Ylist[2 * i]
             predicted = Ylist[2 * i + 1]
@@ -183,6 +203,7 @@ class CommandParser:
             print(" MAD:     " + str(mad))
             print(" MAD:MAE: " + str(score) + "\n")
         
+        # Print some aggregate statistics
         print("Average Values:")
         print(" Mean:    " + str(sum(means) / len(means)))
         print(" MAE:     " + str(sum(maes) / len(maes)))
@@ -201,6 +222,9 @@ class CommandParser:
         print(" MAD:     " + str(mads[best]))
         print(" MAD:MAE: " + str(scores[best]) + "\n")
 
+        # Attempt to open and write to JSON
+        # These keys can later be accessed by histogram and scatter plot commands
+        # TODO: Collect additional information for further processing
         if out_file != None:
             print("Preparing output JSON...")
 
@@ -224,6 +248,9 @@ class CommandParser:
             
 
     def plot_hist(self, in_file, out_file, element, bins=5):
+        """
+        Create a histogram plot for a JSON test output file
+        """
         plt.switch_backend('agg')
         try:
             f = open(self.TEST_RESULT_LOC + in_file, 'r')
@@ -248,6 +275,9 @@ class CommandParser:
         plt.close()
     
     def plot_scatter(self, in_file, out_file, elementX, elementY, elementC=None):
+        """
+        Create a scatter plot for a JSON test output file
+        """
         plt.switch_backend('agg')
         try:
             f = open(self.TEST_RESULT_LOC + in_file, 'r')
@@ -289,6 +319,9 @@ class CommandParser:
         plt.close()
 
     def plot_img(self, queries):
+        """
+        Plot directly to an image with Matplotlib
+        """
         plt.switch_backend('agg')
         X = []
         curr = 0
@@ -307,15 +340,24 @@ class CommandParser:
         plt.figure(dpi=600)
         for i in range(0, len(Ylist)):
             plt.plot(X, Ylist[i], label=labels[i], linestyle=styles[i], color=colors[i])
+
+        ylabel = "diel. function"
+        if self.PART == "IMAG": # Attempt to intelligently select the correct axis title
+            ylabel = "Imag. Part diel. function"
+        if self.PART == "REAL":
+            ylabel = "Real Part diel. function"
         
         plt.xlabel('Energy (eV)')
-        plt.ylabel('Imag. Part diel. function')
+        plt.ylabel(ylabel)
         plt.legend()
 
         plt.savefig(self.PLOT_LOC + filename)
         plt.close()
     
     def plotille_plot(self, X, yValues, colors, labels):
+        """
+        Generate a terminal plot with Plotille
+        """
         fig = plotille.Figure()
         fig.width = 120
         fig.height = 35
@@ -335,6 +377,9 @@ class CommandParser:
         return fig.show(legend=True)
         
     def plot(self, queries):
+        """
+        Plot queries directly to the terminal with Plotille
+        """
         X = []
         curr = 0
         for i in range(0, 300):
@@ -348,6 +393,7 @@ class CommandParser:
         print(self.plotille_plot(X, Ylist, colors, labels))
         print()
 
+        # Generate some statistics for the plot
         if len(Ylist) == 1:
             mad = MAD(Ylist[0])
             print("Mean:\t" + str(sum(Ylist[0]) / len(Ylist[0])))
@@ -366,13 +412,25 @@ class CommandParser:
         
         print()
     
+
     def quickplot(self, query):
+        """
+        Uses the QUICKPLOT_TEMPLATE for Plotille to plot on terminal
+        The query is just the name of the structure
+        """
         self.plot(self.QUICKPLOT_TEMPLATE_PLOTILLE.format(query, query).split(" "))
     
     def quickplot_img(self, name, query):
+        """
+        Uses the QUICKPLOT_TEMPLATE for images to plot to an image
+        The query is just the name of the structure and name is the location to save the png
+        """
         self.plot_img((name + " " + self.QUICKPLOT_TEMPLATE_IMG.format(query, query)).split(" "))
     
     def parse(self, statement):
+        """
+        Processes user commands and dispatches the correct function with appropriate arguments
+        """
         cmpts = statement.split(" ")
 
         match cmpts[0]:
@@ -417,6 +475,9 @@ class CommandParser:
                 print("Command not found, use \"help\"")
 
     def help(self):
+        """
+        Prints help info for the user
+        """
         print(" <-- Help --> ")
         print(" Command List ({} are optional arguments):")
         print(Fore.RED + "  - help" + Fore.RESET)
@@ -449,6 +510,9 @@ class CommandParser:
         print("     Set the directory where the POSCAR files are stored\n")
 
     def start(self):
+        """
+        Entry point for the state-aware command parser
+        """
         while True:
             try:
                 statement = input("\n> ")
@@ -457,6 +521,9 @@ class CommandParser:
                 traceback.print_exc()
     
     def parse_file(self, file):
+        """
+        Run the lines of a file as if the user had entered them
+        """
         statements = []
         try:
             f = open(file, 'r')
@@ -479,6 +546,9 @@ class CommandParser:
 
 
     def get_sample_reference_name(self, lines, name):
+        """
+        Utility for getting the stored reference data by the name of the structure file
+        """
         try:
             f = open(self.NORM_DIV_LOC, 'r')
             norm_div = float(f.readlines()[0])
@@ -500,7 +570,9 @@ class CommandParser:
         raise ValueError("Name not found")
 
     def get_sample_reference(self, lines, index):
-
+        """
+        Utility for getting the stored reference data by line index in id_prop.csv
+        """
         try:
             f = open(self.NORM_DIV_LOC, 'r')
             norm_div = float(f.readlines()[0])
