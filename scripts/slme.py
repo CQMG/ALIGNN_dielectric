@@ -69,8 +69,26 @@ class CommandParser:
         print("  Device:\t" + str(self.DEVICE))
     
 
-    #def slme(self, ID):
-        
+    def slme(self, ID):
+        real = np.array(self.query(ID, "REAL"))
+        imag = np.array(self.query(ID, "IMAG"))
+
+        # Modified from:
+        # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/io/vasp/outputs.py#L1499-L1501
+        energies = real
+        epsilon_1 = np.mean(real, axis=1)
+        epsilon_2 = np.mean(imag, axis=1)
+        absorption = (
+            2
+            * np.pi
+            * np.sqrt(2.0)
+            * eV_to_recip_cm
+            * energies
+            * np.sqrt(-epsilon_1 + np.sqrt(epsilon_1**2 + epsilon_2**2))
+        )
+        # -----
+
+                
     
 
     def query(self, ID, model_type):
