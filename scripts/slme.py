@@ -9,7 +9,11 @@ from jarvis.core.atoms import Atoms
 from jarvis.core.graphs import Graph
 from alignn.models.alignn_atomwise import ALIGNNAtomWise, ALIGNNAtomWiseConfig
 from jarvis.analysis.structure.spacegroup import Spacegroup3D
+from jarvis.analysis.solarefficiency.solar import SolarEfficiency
 from jarvis.db.jsonutils import loadjson
+
+from scipy.constants import physical_constants
+from scipy.constants import speed_of_light
 
 import plotille, math
 from colorama import Fore, Back, Style
@@ -23,7 +27,6 @@ class CommandParser:
         
         self.REAL_DIR = "E500SmaxREAL"
         self.IMAG_DIR = "E500SmaxIMAG_nospike"
-
 
 
 
@@ -69,15 +72,21 @@ class CommandParser:
         print("  Device:\t" + str(self.DEVICE))
     
 
-    def slme(self, ID):
+    def slme(self, ID, dirgap, indirgap):
         real = np.array(self.query(ID, "REAL"))
         imag = np.array(self.query(ID, "IMAG"))
 
         # Modified from:
         # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/io/vasp/outputs.py#L1499-L1501
+        eV_to_recip_cm = 1.0 / (
+            physical_constants["Planck constant in eV s"][0]
+            * speed_of_light
+            * 1e2
+        )
+        
         energies = real
-        epsilon_1 = np.mean(real, axis=1)
-        epsilon_2 = np.mean(imag, axis=1)
+        epsilon_1 = np.mean(real)
+        epsilon_2 = np.mean(imag)
         absorption = (
             2
             * np.pi
@@ -88,8 +97,13 @@ class CommandParser:
         )
         # -----
 
-                
+        absorption = absorption * 100 # Not sure why this happens, see (perhaps the input needs to be a percentage?):
+        # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/db/vasp_to_xml.py#L810        
     
+        seff = SolarEfficiency().slme(energies, absorption, dirgap, indirgap)
+
+        print(seff)
+
 
     def query(self, ID, model_type):
         match model_type:
@@ -169,6 +183,11 @@ class CommandParser:
                     print("Incorrect arguments, see \"help\"")
                 else:
                     self.plotille_plot(cmpts[2], cmpts[1])
+            case "slme":
+                if len(cmpts) != 4:
+                    print("Incorrect arguments, see \"help\"")
+                else:
+                    self.slme(cmpts[1], float(cmpts[2]), float(cmpts[3]))
             case _:
                 print("Command not found, use \"help\"")
 
