@@ -150,4 +150,4 @@ dependencies:
       - torchdata==0.7.1
       - tzdata==2024.1
       - xmltodict==0.13.0
-prefix: /users/cjg00040/.conda/envs/ALIGNN
+prefix: ALIGNN
