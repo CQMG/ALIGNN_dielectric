@@ -84,9 +84,14 @@ class CommandParser:
             * 1e2
         )
         
-        energies = real
-        epsilon_1 = np.mean(real)
-        epsilon_2 = np.mean(imag)
+        energies = []
+        curr = 0
+        for i in range(0, 300):
+            energies.append(curr)
+            curr += 0.05
+        energies = np.array(energies)
+        epsilon_1 = real
+        epsilon_2 = imag
         absorption = (
             2
             * np.pi
@@ -201,6 +206,9 @@ class CommandParser:
         print(Fore.RED + "  - load_models" + Fore.RESET)
         print("     Load the checkpoints\n")
         print(Fore.RED + "  - plot [model_type] [ID]" + Fore.RESET)
+        print("     Plot quickly with Plotille on terminal. model_type is either 'REAL' or 'IMAG'")
+        print("     ID is the name of the structure file to evaluate for\n")
+        print(Fore.RED + "  - slme [ID] [direct bandgap] [indirect bandgap]" + Fore.RESET)
         print("     Plot quickly with Plotille on terminal. model_type is either 'REAL' or 'IMAG'")
         print("     ID is the name of the structure file to evaluate for\n")
 
