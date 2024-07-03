@@ -182,45 +182,42 @@ class CommandParser:
             mean = sum(real) / len(real)
             mae = MAE(real, predicted)
             mad = MAD(real)
-            try:
-                score = mad / mae
-            except ZeroDivisionError:
-                score = -(10 ** 25)
+            score = mae / mad
             means.append(mean)
             maes.append(mae)
             mads.append(mad)
             scores.append(score)
 
-            if score < scores[worst]:
+            if score > scores[worst]:
                 worst = i
             
-            if score > scores[best]:
+            if score < scores[best]:
                 best = i
 
             print(labels[2 * i] + ":")
             print(" Mean:    " + str(mean))
             print(" MAE:     " + str(mae))
             print(" MAD:     " + str(mad))
-            print(" MAD:MAE: " + str(score) + "\n")
+            print(" MAE:MAD: " + str(score) + "\n")
         
         # Print some aggregate statistics
         print("Average Values:")
         print(" Mean:    " + str(sum(means) / len(means)))
         print(" MAE:     " + str(sum(maes) / len(maes)))
         print(" MAD:     " + str(sum(mads) / len(mads)))
-        print(" MAD:MAE: " + str(sum(scores) / len(scores)) + "\n")
+        print(" MAE:MAD: " + str(sum(scores) / len(scores)) + "\n")
 
         print("Worst Sample (" + labels[worst * 2] + "):")
         print(" Mean:    " + str(means[worst]))
         print(" MAE:     " + str(maes[worst]))
         print(" MAD:     " + str(mads[worst]))
-        print(" MAD:MAE: " + str(scores[worst]) + "\n")
+        print(" MAE:MAD: " + str(scores[worst]) + "\n")
 
         print("Best Sample (" + labels[best * 2] + "):")
         print(" Mean:    " + str(means[best]))
         print(" MAE:     " + str(maes[best]))
         print(" MAD:     " + str(mads[best]))
-        print(" MAD:MAE: " + str(scores[best]) + "\n")
+        print(" MAE:MAD: " + str(scores[best]) + "\n")
 
         # Attempt to open and write to JSON
         # These keys can later be accessed by histogram and scatter plot commands
@@ -405,10 +402,7 @@ class CommandParser:
             print("Mean:\t\t" + str(sum(Ylist[0]) / len(Ylist[0])))
             print("MAE:\t\t" + str(mae))
             print("MAD:\t\t" + str(mad))
-            try:
-                print("MAD:MAE:\t" + str(mad / mae))
-            except ZeroDivisionError:
-                print("MAD:MAE:\tExact match")
+            print("MAE:MAD:\t" + str(mae/mad))
         
         print()
     
