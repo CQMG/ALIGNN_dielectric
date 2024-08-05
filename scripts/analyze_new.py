@@ -115,9 +115,9 @@ class CommandParser:
                     atoms = Atoms.from_poscar(self.POSCAR_LOC + ID_str) # working directory or from a downloaded database elsewhere
                 cvn = Spacegroup3D(atoms).conventional_standard_structure
                 
-                labels.append(ID_str + " (Predicted)") # Make it clear on the plot that this is a prediction
+                labels.append(ID_str[7:-5] + " (Predicted)") # Make it clear on the plot that this is a prediction
                 if verbose: # Verbose is mostly for the automated_test
-                    print("Processed " + ID_str + " (Predicted)")
+                    print("Processed " + ID_str[7:-5] + " (Predicted)")
 
                 # Create the atom and line graphs, then evaluate the model 
                 g, lg = Graph.atom_dgl_multigraph(atoms)
@@ -130,16 +130,16 @@ class CommandParser:
                 colors.append(color)
                 try:
                     ID_int = int(ID)
-                    label = self.ID_PROP_LINES[ID_int].split(",")[0]
+                    label = self.ID_PROP_LINES[ID_int].split(",")[0][7:-5]
                     labels.append(label)
                     if verbose: # Verbose is for automated_test
-                        print("Processed " + label)
+                        print("Processed " + label[7:-5])
                     Ylist.append(self.get_sample_reference(self.ID_PROP_LINES, ID_int))
                 except ValueError:
                     Ylist.append(self.get_sample_reference_name(self.ID_PROP_LINES, ID))
-                    labels.append(ID)
+                    labels.append(ID[7:-5])
                     if verbose: # Verbose is for automated_test
-                        print("Processed " + ID)
+                        print("Processed " + ID[7:-5])
             
             if len(cmpts) > 3: # Process the style information from the input query
                 styles.append(cmpts[3])
@@ -182,45 +182,42 @@ class CommandParser:
             mean = sum(real) / len(real)
             mae = MAE(real, predicted)
             mad = MAD(real)
-            try:
-                score = mad / mae
-            except ZeroDivisionError:
-                score = -(10 ** 25)
+            score = mae / mad
             means.append(mean)
             maes.append(mae)
             mads.append(mad)
             scores.append(score)
 
-            if score < scores[worst]:
+            if score > scores[worst]:
                 worst = i
             
-            if score > scores[best]:
+            if score < scores[best]:
                 best = i
 
             print(labels[2 * i] + ":")
             print(" Mean:    " + str(mean))
             print(" MAE:     " + str(mae))
             print(" MAD:     " + str(mad))
-            print(" MAD:MAE: " + str(score) + "\n")
+            print(" MAE:MAD: " + str(score) + "\n")
         
         # Print some aggregate statistics
         print("Average Values:")
         print(" Mean:    " + str(sum(means) / len(means)))
         print(" MAE:     " + str(sum(maes) / len(maes)))
         print(" MAD:     " + str(sum(mads) / len(mads)))
-        print(" MAD:MAE: " + str(sum(scores) / len(scores)) + "\n")
+        print(" MAE:MAD: " + str(sum(scores) / len(scores)) + "\n")
 
         print("Worst Sample (" + labels[worst * 2] + "):")
         print(" Mean:    " + str(means[worst]))
         print(" MAE:     " + str(maes[worst]))
         print(" MAD:     " + str(mads[worst]))
-        print(" MAD:MAE: " + str(scores[worst]) + "\n")
+        print(" MAE:MAD: " + str(scores[worst]) + "\n")
 
         print("Best Sample (" + labels[best * 2] + "):")
         print(" Mean:    " + str(means[best]))
         print(" MAE:     " + str(maes[best]))
         print(" MAD:     " + str(mads[best]))
-        print(" MAD:MAE: " + str(scores[best]) + "\n")
+        print(" MAE:MAD: " + str(scores[best]) + "\n")
 
         # Attempt to open and write to JSON
         # These keys can later be accessed by histogram and scatter plot commands
@@ -270,10 +267,10 @@ class CommandParser:
             plt.plot(X, Ylist[i], label=labels[i], linestyle=styles[i], color=colors[i])
 
         ylabel = "diel. function"
-        if self.PART == "IMAG": # Attempt to intelligently select the correct axis title
-            ylabel = "Imag. Part diel. function"
-        if self.PART == "REAL":
-            ylabel = "Real Part diel. function"
+        if self.PART == "imag": # Attempt to intelligently select the correct axis title
+            ylabel = "Imag. Part dielectric function"
+        if self.PART == "real":
+            ylabel = "Real Part dielectric function"
         
         plt.xlabel('Energy (eV)')
         plt.ylabel(ylabel)
@@ -333,10 +330,7 @@ class CommandParser:
             print("Mean:\t\t" + str(sum(Ylist[0]) / len(Ylist[0])))
             print("MAE:\t\t" + str(mae))
             print("MAD:\t\t" + str(mad))
-            try:
-                print("MAD:MAE:\t" + str(mad / mae))
-            except ZeroDivisionError:
-                print("MAD:MAE:\tExact match")
+            print("MAE:MAD:\t" + str(mae/mad))
         
         print()
     

@@ -8,12 +8,14 @@ from jarvis.db.figshare import data
 from jarvis.core.atoms import Atoms
 from jarvis.core.spectrum import Spectrum
 
+import json
+
 
 new_dist = np.arange(0, 15, 0.05)
 
 SAMPLE_COUNT = int(input("How many samples to gather? : "))
 
-PART = input("Which component of the dielectric function? (real_xx) : ")
+PART = input("Which component of the dielectric function? (i.e. real_xx) : ")
 
 D3D = data("dft_3d")
 
@@ -39,6 +41,9 @@ lines = []
 names = []
 
 max_value = -500.0
+
+
+metadata_dict = {}
 
 for sample in valid_samples:
     w = Webpage(jid=sample['jid'])
@@ -93,6 +98,27 @@ for sample in valid_samples:
     if count == SAMPLE_COUNT:
         break
 
+
+    # Gathering metadata
+    
+    D = w.to_dict()['basic_info']
+
+    mbj_dir_gap = float(D['main_optics_mbj']['main_optics_mbj_info']['opto_dir_gap'])
+    mbj_indir_gap = float(D['main_optics_mbj']['main_optics_mbj_info']['opto_indir_gap'])
+
+    ref_slme = float(D['main_optics_mbj']['main_optics_mbj_info']['solar_slme'])
+    ref_sq = float(D['main_optics_mbj']['main_optics_mbj_info']['solar_sq'])
+
+    metadata_dict[name] = {
+        'mbj_dir_gap' : mbj_dir_gap,
+        'mbj_indir_gap' : mbj_indir_gap,
+        'ref_slme' : ref_slme,
+        'ref_sq' : ref_sq
+    }
+
+
+
+
     # Progress info:
     progress = (count / SAMPLE_COUNT) * 100
     if progress >= next_threshold:
@@ -112,3 +138,11 @@ for i in range(0, len(lines)):
 f.close()
 
 print("id_prop done")
+
+
+print("Writing metadata.json...")
+
+with open('metadata.json', 'w') as meta_json:
+    json.dump(metadata_dict, meta_json)
+
+print("metadata.json done")
