@@ -95,4 +95,3 @@ class ModelContext:
         print(f"  Type:{Fore.BLUE}\t{self.TYPE}{Fore.RESET}")
         
 
-    def 
