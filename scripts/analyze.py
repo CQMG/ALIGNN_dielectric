@@ -17,6 +17,8 @@ from colorama import Fore, Back, Style
 
 import matplotlib.pyplot as plt
 
+from sklearn.metrics.pairwise import cosine_similarity
+
 class CommandParser:
     def __init__(self):
         '''Initialization sets a number of default state variables, most of which are used by load_model and the plotting commands.'''
@@ -170,6 +172,9 @@ class CommandParser:
         maes = []
         mads = []
         scores = []
+        cos_sims = []
+        cos_sim_derivatives = []
+        cos_sim_derivatives_broad = []
 
         best = 0
         worst = 0
@@ -183,10 +188,17 @@ class CommandParser:
             mae = MAE(real, predicted)
             mad = MAD(real)
             score = mae / mad
+            c_s = cos_sim(real, predicted)
+            c_s_d = cos_sim_derivative(real, predicted)
+            c_s_d_b = cos_sim_derivative_broad(real, predicted)
+
             means.append(mean)
             maes.append(mae)
             mads.append(mad)
             scores.append(score)
+            cos_sims.append(c_s)
+            cos_sim_derivatives.append(c_s_d)
+            cos_sim_derivatives_broad.append(c_s_d_b)
 
             if score > scores[worst]:
                 worst = i
@@ -231,7 +243,10 @@ class CommandParser:
                     "mean": means[i],
                     "mae": maes[i],
                     "mad": mads[i],
-                    "score": scores[i]
+                    "score": scores[i],
+                    "cosine_similarity": cos_sims[i],
+                    "cosine_similarity_derivative": cos_sim_derivatives[i],
+                    "cosine_similarity_derivative_broad": cos_sim_derivatives_broad[i]
                 }
             
             try:
@@ -246,6 +261,7 @@ class CommandParser:
     def plot_img(self, queries):
         """
         Plot directly to an image with Matplotlib
+        """
         """
         plt.switch_backend('agg')
         X = []
@@ -278,6 +294,31 @@ class CommandParser:
 
         plt.savefig(self.PLOT_LOC + filename)
         plt.close()
+        """
+        plt.switch_backend('agg')
+        X = []
+        curr = 0
+        for i in range(0, 300):
+            X.append(curr)
+            curr += 0.05
+
+        filename = queries[0]
+        queries_stripped = queries[1:]
+
+        try:
+            Ylist, colors, styles, labels = self.get_plot_data(queries_stripped)
+        except TypeError:
+            return None
+        
+        plt.figure(dpi=300)
+        plt.rc('xtick', labelsize=40)
+        plt.rc('ytick', labelsize=40)
+        for i in range(0, len(Ylist)):
+            plt.plot(X, Ylist[i], label=labels[i], linestyle=styles[i], color=colors[i], linewidth=4)
+        
+        plt.savefig(self.PLOT_LOC + filename)
+        plt.close()
+        
     
     def plotille_plot(self, X, yValues, colors, labels):
         """
@@ -331,6 +372,9 @@ class CommandParser:
             print("MAE:\t\t" + str(mae))
             print("MAD:\t\t" + str(mad))
             print("MAE:MAD:\t" + str(mae/mad))
+            print("COS_SIM:\t" + str(cos_sim(Ylist[0], Ylist[1])))
+            print("COS_SIM_D:\t" + str(cos_sim_derivative(Ylist[0], Ylist[1])))
+            print("COS_SIM_D_BR:\t" + str(cos_sim_derivative_broad(Ylist[0], Ylist[1])))
         
         print()
     
@@ -495,9 +539,34 @@ def MAD(A):
     
     return total / len(A)
 
+def cos_sim(A, B):
+    return cosine_similarity([A], [B])[0][0]
 
+def discrete_derivative(A):
+    out = []
+    for i in range(0, len(A) - 2):
+        out.append((A[i+2] - A[i])/0.3)
 
+    return out
 
+def cos_sim_derivative(A, B):
+    A_d = discrete_derivative(A)
+    B_d = discrete_derivative(B)
+
+    return cos_sim(A_d, B_d)
+
+def discrete_derivative_broad(A):
+    out = []
+    for i in range(0, len(A) - 10):
+        out.append((A[i+10] - A[i])/0.5)
+
+    return out
+
+def cos_sim_derivative_broad(A, B):
+    A_d = discrete_derivative_broad(A)
+    B_d = discrete_derivative_broad(B)
+
+    return cos_sim(A_d, B_d)
 
 
 if __name__ == "__main__":

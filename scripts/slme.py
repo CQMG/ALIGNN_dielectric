@@ -142,7 +142,13 @@ class CommandParser:
         errors = []
 
         for struct in test_structs:
-            seff = self.slme(struct, self.METADATA[struct]["mbj_dir_gap"], self.METADATA[struct]["mbj_indir_gap"], True)
+            try:
+                seff = self.slme(struct, self.METADATA[struct]["mbj_dir_gap"], self.METADATA[struct]["mbj_indir_gap"], True)
+            except KeyError:
+                seff = self.slme(struct, self.METADATA[struct]["dir_gap"], self.METADATA[struct]["indir_gap"], True)
+            real = self.query(struct, "REAL")
+            imag = self.query(struct, "IMAG")
+            
             if not math.isinf(seff):
                 ref_seffs.append(self.METADATA[struct]["ref_slme"])
                 seffs.append(seff)
@@ -180,13 +186,19 @@ class CommandParser:
             if self.METADATA == None:
                 print("Missing metadata, either provide valid metadata or specify bandgaps directly")
                 return None
-            dirgap = self.METADATA[ID]["mbj_dir_gap"]
+            try:
+                dirgap = self.METADATA[ID]["mbj_dir_gap"]
+            except KeyError:
+                dirgap = self.METADATA[ID]["dir_gap"]
 
         if indirgap == None:
             if self.METADATA == None:
                 print("Missing metadata, either provide valid metadata or specify bandgaps directly")
                 return None
-            indirgap = self.METADATA[ID]["mbj_indir_gap"]
+            try:
+                indirgap = self.METADATA[ID]["mbj_indir_gap"]
+            except KeyError:
+                indirgap = self.METADATA[ID]["indir_gap"]
 
 
         # Modified from:
@@ -239,8 +251,12 @@ class CommandParser:
             print(Fore.RED + "Metadata missing" + Fore.RESET)
         else:
             print("Reference info: ")
-            print(" Direct Gap:   " + str(self.METADATA[ID]["mbj_dir_gap"]))
-            print(" Indirect Gap: " + str(self.METADATA[ID]["mbj_indir_gap"]))
+            try:
+                print(" Direct Gap:   " + str(self.METADATA[ID]["mbj_dir_gap"]))
+                print(" Indirect Gap: " + str(self.METADATA[ID]["mbj_indir_gap"]))
+            except KeyError:
+                print(" Direct Gap:   " + str(self.METADATA[ID]["dir_gap"]))
+                print(" Indirect Gap: " + str(self.METADATA[ID]["indir_gap"]))
             print(" SLME:         " + str(self.METADATA[ID]["ref_slme"]) + "%")
             print(" SQ:           " + str(self.METADATA[ID]["ref_sq"]) + "%")
 
