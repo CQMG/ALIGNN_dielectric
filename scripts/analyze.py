@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-print("Loading, wait for \">\" prompt...")
+print("Loading modules, wait for \">\" prompt...")
 
-import traceback, json, sys, os
+import os, sys, json, traceback
 
 import torch
+
 from jarvis.core.atoms import Atoms
 from jarvis.core.graphs import Graph
 from alignn.models.alignn_atomwise import ALIGNNAtomWise, ALIGNNAtomWiseConfig
@@ -16,48 +17,56 @@ from colorama import Fore, Back, Style
 
 import matplotlib.pyplot as plt
 
+from sklearn.metrics.pairwise import cosine_similarity
+
 class CommandParser:
     def __init__(self):
         '''Initialization sets a number of default state variables, most of which are used by load_model and the plotting commands.'''
-        self.ID_PROP_LOC = "structure_data/id_prop.csv"
         self.MODEL_LOC = "output_data/best_model.pt"
         self.CONFIG_LOC = "output_data/config.json"
-        self.POSCAR_LOC = "structure_data/"
         self.PLOT_LOC = "sample_plots/"
         self.TEST_RESULT_LOC = "test_results/"
         self.TEST_FILE_LOC = "test_files/"
-
-        self.NORM_DIV_LOC = "output_data/norm_div.txt"
 
         self.DEVICE = torch.device("cpu")
 
         self.MODEL = None
 
-        self.PART = None
-        cwd = os.getcwd().split("/")[-1]
-        if "REAL" in cwd: # Attempt to use the current working directory to decide whether this is a real or imaginary plot
-            self.PART = "REAL"
-        if "IMAG" in cwd:
-            self.PART = "IMAG"
+        try:
+            f = open('./env_config.json')
+            env_config = json.load(f)
+        except FileNotFoundError:
+            print("Could not find env_config.json. There are two possibilities:\n - You didn't use the templates to create this model.\n - This model was built using an older version of these scripts, in which case\n    you should use the legacy version of this script.")
+            exit(1)
 
+        try:
+            self.POSCAR_LOC = env_config['data']
+            self.ID_PROP_LOC = os.path.join(env_config['data'], "id_prop.csv")
+        except AttributeError:
+            print("Malformed env_config.json: Missing key 'data'")
+            exit(1)
+        
+        try:
+            self.PART = env_config['type']
+        except AttributeError:
+            print("Malformed env_config.json: Missing key 'type'")
+            exit(1)
+        
+        self.QUICKPLOT_TEMPLATE_PLOTILLE = "{}:blue:_:dashed {}:red:?" # Alter the quickplot template here
+        self.QUICKPLOT_TEMPLATE_IMG = "{}:black:_:dashed {}:red:?"
+
+        try:
+            id_prop_file = open(self.ID_PROP_LOC)
+            self.ID_PROP_LINES = id_prop_file.readlines()
+        except FileNotFoundError:
+            print("WARNING: id_prop.csv not found. Any attempt to access reference data will fail.")
+    
         self.QUICKPLOT_TEMPLATE_PLOTILLE = "{}:blue:_:dashed {}:red:?" # Alter the quickplot template here
         self.QUICKPLOT_TEMPLATE_IMG = "{}:black:_:dashed {}:red:?"
 
         id_prop_file = open(self.ID_PROP_LOC)
         self.ID_PROP_LINES = id_prop_file.readlines()
-    
-    def set_id_prop(self, new):
-        self.ID_PROP_LOC = new
-    
-    def set_model_loc(self, new):
-        self.MODEL_LOC = new
-    
-    def set_config_loc(self, new):
-        self.CONFIG_LOC = new
-    
-    def set_poscar_loc(self, new):
-        self.POSCAR_LOC = new
-    
+
     def load_model(self):
         '''Loads the model from the configured state.'''
         if torch.cuda.is_available():
@@ -73,7 +82,8 @@ class CommandParser:
 
         print("Model loaded successfully:")
         print("  Device:\t" + str(self.DEVICE))
-    
+        print("  Type:  \t" + str(self.PART))
+
     def get_plot_data(self, queries, verbose=False):
         """
         Takes a list of queries and returns a tuple that encodes proper plotting info for Plotille or Matplotlib
@@ -107,21 +117,13 @@ class CommandParser:
                     atoms = Atoms.from_poscar(self.POSCAR_LOC + ID_str) # working directory or from a downloaded database elsewhere
                 cvn = Spacegroup3D(atoms).conventional_standard_structure
                 
-                labels.append(ID_str + " (Predicted)") # Make it clear on the plot that this is a prediction
+                labels.append(ID_str[7:-5] + " (Predicted)") # Make it clear on the plot that this is a prediction
                 if verbose: # Verbose is mostly for the automated_test
-                    print("Processed " + ID_str + " (Predicted)")
-
-                try: # Will detect and use a normalization divisor if it was used during data processing
-                    f = open(self.NORM_DIV_LOC, 'r')
-                    norm_div = float(f.readlines()[0])
-                    f.close()
-                    
-                except Exception:
-                    norm_div = 1.0
+                    print("Processed " + ID_str[7:-5] + " (Predicted)")
 
                 # Create the atom and line graphs, then evaluate the model 
                 g, lg = Graph.atom_dgl_multigraph(atoms)
-                Ylist.append(list(map(lambda x: x * norm_div, (self.MODEL([g.to(self.DEVICE), lg.to(self.DEVICE)]))["out"].detach().cpu().numpy().flatten().tolist())))
+                Ylist.append(list((self.MODEL([g.to(self.DEVICE), lg.to(self.DEVICE)]))["out"].detach().cpu().numpy().flatten().tolist()))
 
 
             else: # Not querying the model, just pulling downloaded data
@@ -130,16 +132,16 @@ class CommandParser:
                 colors.append(color)
                 try:
                     ID_int = int(ID)
-                    label = self.ID_PROP_LINES[ID_int].split(",")[0]
+                    label = self.ID_PROP_LINES[ID_int].split(",")[0][7:-5]
                     labels.append(label)
                     if verbose: # Verbose is for automated_test
-                        print("Processed " + label)
+                        print("Processed " + label[7:-5])
                     Ylist.append(self.get_sample_reference(self.ID_PROP_LINES, ID_int))
                 except ValueError:
                     Ylist.append(self.get_sample_reference_name(self.ID_PROP_LINES, ID))
-                    labels.append(ID)
+                    labels.append(ID[7:-5])
                     if verbose: # Verbose is for automated_test
-                        print("Processed " + ID)
+                        print("Processed " + ID[7:-5])
             
             if len(cmpts) > 3: # Process the style information from the input query
                 styles.append(cmpts[3])
@@ -170,6 +172,9 @@ class CommandParser:
         maes = []
         mads = []
         scores = []
+        cos_sims = []
+        cos_sim_derivatives = []
+        cos_sim_derivatives_broad = []
 
         best = 0
         worst = 0
@@ -183,10 +188,17 @@ class CommandParser:
             mae = MAE(real, predicted)
             mad = MAD(real)
             score = mae / mad
+            c_s = cos_sim(real, predicted)
+            c_s_d = cos_sim_derivative(real, predicted)
+            c_s_d_b = cos_sim_derivative_broad(real, predicted)
+
             means.append(mean)
             maes.append(mae)
             mads.append(mad)
             scores.append(score)
+            cos_sims.append(c_s)
+            cos_sim_derivatives.append(c_s_d)
+            cos_sim_derivatives_broad.append(c_s_d_b)
 
             if score > scores[worst]:
                 worst = i
@@ -231,7 +243,10 @@ class CommandParser:
                     "mean": means[i],
                     "mae": maes[i],
                     "mad": mads[i],
-                    "score": scores[i]
+                    "score": scores[i],
+                    "cosine_similarity": cos_sims[i],
+                    "cosine_similarity_derivative": cos_sim_derivatives[i],
+                    "cosine_similarity_derivative_broad": cos_sim_derivatives_broad[i]
                 }
             
             try:
@@ -243,81 +258,10 @@ class CommandParser:
                 print("Could not write to JSON file")
                 raise
             
-
-    def plot_hist(self, in_file, out_file, element, bins=5):
-        """
-        Create a histogram plot for a JSON test output file
-        """
-        plt.switch_backend('agg')
-        try:
-            f = open(self.TEST_RESULT_LOC + in_file, 'r')
-            data = json.load(f)
-            f.close()
-        except Exception:
-            print("Could not open requested file.")
-            traceback.print_exc()
-            return None
-        
-        values = []
-        for key in data.keys():
-            values.append(data[key][element])
-        
-        plt.figure(dpi=600)
-
-        plt.xlabel(element)
-        plt.ylabel("Count")
-
-        plt.hist(values, bins=bins)
-        plt.savefig(self.TEST_RESULT_LOC + out_file)
-        plt.close()
-    
-    def plot_scatter(self, in_file, out_file, elementX, elementY, elementC=None):
-        """
-        Create a scatter plot for a JSON test output file
-        """
-        plt.switch_backend('agg')
-        try:
-            f = open(self.TEST_RESULT_LOC + in_file, 'r')
-            data = json.load(f)
-            f.close()
-        except Exception:
-            print("Could not open requested file.")
-            traceback.print_exc()
-            return None
-        
-        xValues = []
-        yValues = []
-        cValues = []
-
-        for key in data.keys():
-            xValues.append(data[key][elementX])
-            yValues.append(data[key][elementY])
-            if elementC != None:
-                cValues.append(data[key][elementC])
-
-        figure, axes = plt.subplots()
-
-        scatter = axes.scatter(xValues, yValues, c=cValues)
-        figure.colorbar(scatter)
-        
-        plt.figure(dpi=600)
-
-        plt.xlabel(elementX)
-        plt.ylabel(elementY)
-
-#        if len(cValues) != 0:
-#            scatter = plt.scatter(xValues, yValues, c=cValues)
-#        else:
-#            scatter = plt.scatter(xValues, yValues)
-#        
-#        plt.legend(handles=scatter.legend_elements()[0], title=elementC)
-
-        plt.savefig(self.TEST_RESULT_LOC + out_file)
-        plt.close()
-
     def plot_img(self, queries):
         """
         Plot directly to an image with Matplotlib
+        """
         """
         plt.switch_backend('agg')
         X = []
@@ -339,10 +283,10 @@ class CommandParser:
             plt.plot(X, Ylist[i], label=labels[i], linestyle=styles[i], color=colors[i])
 
         ylabel = "diel. function"
-        if self.PART == "IMAG": # Attempt to intelligently select the correct axis title
-            ylabel = "Imag. Part diel. function"
-        if self.PART == "REAL":
-            ylabel = "Real Part diel. function"
+        if self.PART == "imag": # Attempt to intelligently select the correct axis title
+            ylabel = "Imag. Part dielectric function"
+        if self.PART == "real":
+            ylabel = "Real Part dielectric function"
         
         plt.xlabel('Energy (eV)')
         plt.ylabel(ylabel)
@@ -350,6 +294,31 @@ class CommandParser:
 
         plt.savefig(self.PLOT_LOC + filename)
         plt.close()
+        """
+        plt.switch_backend('agg')
+        X = []
+        curr = 0
+        for i in range(0, 300):
+            X.append(curr)
+            curr += 0.05
+
+        filename = queries[0]
+        queries_stripped = queries[1:]
+
+        try:
+            Ylist, colors, styles, labels = self.get_plot_data(queries_stripped)
+        except TypeError:
+            return None
+        
+        plt.figure(dpi=300)
+        plt.rc('xtick', labelsize=40)
+        plt.rc('ytick', labelsize=40)
+        for i in range(0, len(Ylist)):
+            plt.plot(X, Ylist[i], label=labels[i], linestyle=styles[i], color=colors[i], linewidth=4)
+        
+        plt.savefig(self.PLOT_LOC + filename)
+        plt.close()
+        
     
     def plotille_plot(self, X, yValues, colors, labels):
         """
@@ -403,6 +372,9 @@ class CommandParser:
             print("MAE:\t\t" + str(mae))
             print("MAD:\t\t" + str(mad))
             print("MAE:MAD:\t" + str(mae/mad))
+            print("COS_SIM:\t" + str(cos_sim(Ylist[0], Ylist[1])))
+            print("COS_SIM_D:\t" + str(cos_sim_derivative(Ylist[0], Ylist[1])))
+            print("COS_SIM_D_BR:\t" + str(cos_sim_derivative_broad(Ylist[0], Ylist[1])))
         
         print()
     
@@ -421,6 +393,46 @@ class CommandParser:
         """
         self.plot_img((name + " " + self.QUICKPLOT_TEMPLATE_IMG.format(query, query)).split(" "))
     
+
+
+
+    def get_sample_reference_name(self, lines, name):
+        """
+        Utility for getting the stored reference data by the name of the structure file
+        """
+
+        name_fixed = name.replace(",", "").replace("\"", "").replace("'", "").replace("\n", "")
+
+        out = []
+
+        for line in lines:
+            elements = line.split(",")
+            if elements[0] == name or elements[0] == name_fixed:
+                for i in range(1, len(elements)):
+                    out.append(float(elements[i]))
+                return out
+
+        raise ValueError("Name not found")
+
+    def get_sample_reference(self, lines, index):
+        """
+        Utility for getting the stored reference data by line index in id_prop.csv
+        """
+
+        out = []
+
+        line = lines[index]
+        elements = line.split(",")
+        for i in range(1, len(elements)):
+            out.append(float(elements[i]))
+        
+        return out
+
+
+
+
+
+
     def parse(self, statement):
         """
         Processes user commands and dispatches the correct function with appropriate arguments
@@ -434,14 +446,6 @@ class CommandParser:
                 self.help()
             case "load_model":
                 self.load_model()
-            case "set_id_prop":
-                self.set_id_prop(cmpts[1])
-            case "set_model_loc":
-                self.set_model_loc(cmpts[1])
-            case "set_config_loc":
-                self.set_config_loc(cmpts[1])
-            case "set_poscar_loc":
-                self.set_poscar_loc(cmpts[1])
             case "quickplot":
                 self.quickplot(cmpts[1])
             case "plot":
@@ -455,16 +459,6 @@ class CommandParser:
                     self.automated_test(cmpts[1], cmpts[2])
                 else:
                     self.automated_test(cmpts[1])
-            case "plot_hist":
-                if len(cmpts) > 4:
-                    self.plot_hist(cmpts[1], cmpts[2], cmpts[3], int(cmpts[4]))
-                else:
-                    self.plot_hist(cmpts[1], cmpts[2], cmpts[3])
-            case "plot_scatter":
-                if len(cmpts) > 5:
-                    self.plot_scatter(cmpts[1], cmpts[2], cmpts[3], cmpts[4], cmpts[5])
-                else:
-                    self.plot_scatter(cmpts[1], cmpts[2], cmpts[3], cmpts[4])
             case _:
                 print("Command not found, use \"help\"")
 
@@ -479,7 +473,7 @@ class CommandParser:
         print(Fore.RED + "  - quit" + Fore.RESET)
         print("     Quit the program\n")
         print(Fore.RED + "  - load_model" + Fore.RESET)
-        print("     Load the checkpoint from file set by set_model_loc\n")
+        print("     Load the checkpoint from file\n")
         print(Fore.RED + "  - plot [plot 1] {plot 2} {plot 3} ..." + Fore.RESET)
         print("     Plot on terminal with Plotille")
         print("     Plots in the format [structure file name or id_prop index]:[color]:{\"?\" to use model and predict}")
@@ -490,18 +484,7 @@ class CommandParser:
         print("     Color options: "+Fore.BLACK+"black, "+Fore.RED+"red,"+Fore.GREEN+" green,"+Fore.YELLOW+" yellow,"+Fore.BLUE+" blue,"+Fore.MAGENTA+" magenta,"+Fore.CYAN+" cyan,"+Fore.WHITE+" white"+Fore.RESET+"\n")
         print(Fore.RED + "  - automated_test [test file] {output file}" + Fore.RESET)
         print("     Perform an automated test using \"\\n\"-delimited test file and optionally output results to JSON file\n")
-        print(Fore.RED + "  - plot_hist [json results] [output png] [value to plot] {# of bins}" + Fore.RESET)
-        print("     Plot a histogram using a results file of the 'value to plot' value in the file\n")
-        print(Fore.RED + "  - plot_scatter [input file] [output png] [X element] [Y element] {Color element}" + Fore.RESET)
-        print("     Plot scatter plot with the given elements from the results file. Can use color element to plot a third axis as the shade of the points\n")
-        print(Fore.RED + "  - set_id_prop [file name]" + Fore.RESET)
-        print("     Set the id_prop.csv location\n")
-        print(Fore.RED + "  - set_model_loc [file name]" + Fore.RESET)
-        print("     Set the location of the checkpoint file to load\n")
-        print(Fore.RED + "  - set_config_loc [file name]" + Fore.RESET)
-        print("     Set the location of the config.json file to load the model with\n")
-        print(Fore.RED + "  - set_poscar_loc [file name]" + Fore.RESET)
-        print("     Set the directory where the POSCAR files are stored\n")
+
 
     def start(self):
         """
@@ -509,7 +492,7 @@ class CommandParser:
         """
         while True:
             try:
-                statement = input("\n> ")
+                statement = input("\n > ")
                 self.parse(statement)
             except Exception as e:
                 traceback.print_exc()
@@ -536,52 +519,6 @@ class CommandParser:
                 traceback.print_exc()
                 exit(2)
         
-            
-
-
-    def get_sample_reference_name(self, lines, name):
-        """
-        Utility for getting the stored reference data by the name of the structure file
-        """
-        try:
-            f = open(self.NORM_DIV_LOC, 'r')
-            norm_div = float(f.readlines()[0])
-            f.close()
-        except Exception:
-            norm_div = 1.0
-
-        name_fixed = name.replace(",", "").replace("\"", "").replace("'", "").replace("\n", "")
-
-        out = []
-
-        for line in lines:
-            elements = line.split(",")
-            if elements[0] == name or elements[0] == name_fixed:
-                for i in range(1, len(elements)):
-                    out.append(float(elements[i]) * norm_div)
-                return out
-
-        raise ValueError("Name not found")
-
-    def get_sample_reference(self, lines, index):
-        """
-        Utility for getting the stored reference data by line index in id_prop.csv
-        """
-        try:
-            f = open(self.NORM_DIV_LOC, 'r')
-            norm_div = float(f.readlines()[0])
-            f.close()
-        except Exception:
-            norm_div = 1.0
-
-        out = []
-
-        line = lines[index]
-        elements = line.split(",")
-        for i in range(1, len(elements)):
-            out.append(float(elements[i]) * norm_div)
-        
-        return out
 
 
 def MAE(A, B):
@@ -602,6 +539,34 @@ def MAD(A):
     
     return total / len(A)
 
+def cos_sim(A, B):
+    return cosine_similarity([A], [B])[0][0]
+
+def discrete_derivative(A):
+    out = []
+    for i in range(0, len(A) - 2):
+        out.append((A[i+2] - A[i])/0.3)
+
+    return out
+
+def cos_sim_derivative(A, B):
+    A_d = discrete_derivative(A)
+    B_d = discrete_derivative(B)
+
+    return cos_sim(A_d, B_d)
+
+def discrete_derivative_broad(A):
+    out = []
+    for i in range(0, len(A) - 10):
+        out.append((A[i+10] - A[i])/0.5)
+
+    return out
+
+def cos_sim_derivative_broad(A, B):
+    A_d = discrete_derivative_broad(A)
+    B_d = discrete_derivative_broad(B)
+
+    return cos_sim(A_d, B_d)
 
 
 if __name__ == "__main__":

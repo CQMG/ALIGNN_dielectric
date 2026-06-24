@@ -2,7 +2,7 @@
 
 print("Loading, wait for \">\" prompt...")
 
-import traceback, json, sys
+import traceback, json, sys, os
 
 import torch
 from jarvis.core.atoms import Atoms
@@ -22,29 +22,79 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+
 class CommandParser:
     def __init__(self):
         
-        self.REAL_DIR = "E500SmaxREAL"
-        self.IMAG_DIR = "E500SmaxIMAG_nospike"
+        #self.REAL_DIR = os.path.join("./", input("Real model directory: "))
+        self.REAL_DIR = os.path.join(".", "REAL")
+        #self.IMAG_DIR = os.path.join("./", input("Imaginary model directory: "))
+        self.IMAG_DIR = os.path.join(".", "IMAG")
+
+        self.DEFAULT_MODEL_LOC = True
+
+
+        self.STRUCTURES_LOC = os.path.join(".", "DATA")
+
+        self.DEFAULT_STRUCT_LOC = True
+
+        self.METADATA_LOC = os.path.join(self.STRUCTURES_LOC, "metadata.json")
+
+        self.METADATA = None
+
+        try:
+            with open(self.METADATA_LOC, 'r') as f:
+                self.METADATA = json.load(f)
+        except FileNotFoundError:
+            print("Unable to load metadata in default location (./DATA/metadata.json),")
+            print("Force a reload of metadata with 'set_data'")
 
 
 
-        self.MODEL_LOC_REAL = self.REAL_DIR + "/output_data/best_model.pt"
-        self.MODEL_LOC_IMAG = self.IMAG_DIR + "/output_data/best_model.pt"
+        self.MODEL_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/best_model.pt")
+        self.MODEL_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/best_model.pt")
 
-        self.CONFIG_LOC_REAL = self.REAL_DIR + "/output_data/config.json"
-        self.CONFIG_LOC_IMAG = self.IMAG_DIR + "/output_data/config.json"
-
-        self.NORM_DIV_LOC_REAL = self.REAL_DIR + "/output_data/norm_div.txt"
-        self.NORM_DIV_LOC_IMAG = self.IMAG_DIR + "/output_data/norm_div.txt"
+        self.CONFIG_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/config.json")
+        self.CONFIG_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/config.json")
 
         self.DEVICE = torch.device("cpu")
 
         self.MODEL_REAL = None
         self.MODEL_IMAG = None
+    
+    def set_models(self, real_dir, imag_dir):
+        self.REAL_DIR = os.path.join(".", real_dir)
+        self.IMAG_DIR = os.path.join(".", imag_dir)
 
-        self.STRUCTURES_LOC = "E500SmaxREAL/structure_data/"
+        self.MODEL_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/best_model.pt")
+        self.MODEL_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/best_model.pt")
+
+        self.CONFIG_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/config.json")
+        self.CONFIG_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/config.json")
+
+        self.DEFAULT_MODEL_LOC = False
+        self.DEFAULT_STRUCT_LOC = False
+
+        self.MODEL_REAL = None
+        self.MODEL_IMAG = None
+
+        print("Models switched, use load_models before attempting to query them\n")
+    
+    def set_data(self, new_dir):
+        self.STRUCTURES_LOC = os.path.join(".", new_dir)
+
+        self.DEFAULT_STRUCT_LOC = False
+
+        self.METADATA_LOC = os.path.join(self.STRUCTURES_LOC, "metadata.json")
+
+        try:
+            with open(self.METADATA_LOC, 'r') as f:
+                self.METADATA = json.load(f)
+        except FileNotFoundError:
+            print("Unable to load metadata in specified location (" + str(self.METADATA_LOC) + "),")
+            print("Force a reload of metadata with 'set_data'")
+
+
 
     def load_models(self):
         if torch.cuda.is_available():
@@ -68,13 +118,88 @@ class CommandParser:
         self.MODEL_IMAG.eval()
         self.MODEL_REAL.eval()
 
+        if self.DEFAULT_MODEL_LOC:
+            print(Fore.RED + "WARNING: " + Fore.RESET + "Using the default models in './REAL' and './IMAG'")
+            print("         This is not recommended, switch them with 'set_models'\n")
+        
+        if self.DEFAULT_STRUCT_LOC:
+            print(Fore.RED + "WARNING: " + Fore.RESET + "Using the default structure data in './DATA'")
+            print("         This is not recommended, switch it with 'set_data'\n")
+
         print("Models loaded successfully:")
         print("  Device:\t" + str(self.DEVICE))
+
+    
+    def automated_test(self, test_file, output_file):
+        f = open(test_file)
+        test_structs = list(map(lambda x: x.strip(), f.readlines()))
+        f.close()
+
+        valid_structs = []
+        seffs = []
+        ref_seffs = []
+
+        errors = []
+
+        for struct in test_structs:
+            try:
+                seff = self.slme(struct, self.METADATA[struct]["mbj_dir_gap"], self.METADATA[struct]["mbj_indir_gap"], True)
+            except KeyError:
+                seff = self.slme(struct, self.METADATA[struct]["dir_gap"], self.METADATA[struct]["indir_gap"], True)
+            real = self.query(struct, "REAL")
+            imag = self.query(struct, "IMAG")
+            
+            if not math.isinf(seff):
+                ref_seffs.append(self.METADATA[struct]["ref_slme"])
+                seffs.append(seff)
+                valid_structs.append(struct)
+
+                errors.append(abs(seffs[-1] - ref_seffs[-1]))
+        
+        mae = MAE(seffs, ref_seffs)
+
+        print("MAE: " + str(mae))
+
+        entries = {}
+
+        for i in range(0, len(valid_structs)):
+            entries[valid_structs[i]] = {}
+
+            entries[valid_structs[i]]["predicted_slme"] = seffs[i]
+            entries[valid_structs[i]]["error"] = errors[i]
+
+        try:
+            f = open(output_file, "w")
+            json.dump(entries, f, indent=4)
+            f.close()
+            print("Successfully saved to " + output_file)
+        except Exception:
+            print("Could not write to JSON file")
+            raise
     
 
-    def slme(self, ID, dirgap, indirgap):
+    def slme(self, ID, dirgap=None, indirgap=None, silent=False):
         real = np.array(self.query(ID, "REAL"))
         imag = np.array(self.query(ID, "IMAG"))
+
+        if dirgap == None:
+            if self.METADATA == None:
+                print("Missing metadata, either provide valid metadata or specify bandgaps directly")
+                return None
+            try:
+                dirgap = self.METADATA[ID]["mbj_dir_gap"]
+            except KeyError:
+                dirgap = self.METADATA[ID]["dir_gap"]
+
+        if indirgap == None:
+            if self.METADATA == None:
+                print("Missing metadata, either provide valid metadata or specify bandgaps directly")
+                return None
+            try:
+                indirgap = self.METADATA[ID]["mbj_indir_gap"]
+            except KeyError:
+                indirgap = self.METADATA[ID]["indir_gap"]
+
 
         # Modified from:
         # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/io/vasp/outputs.py#L1499-L1501
@@ -105,48 +230,69 @@ class CommandParser:
         absorption = absorption * 100 # Not sure why this happens, see (perhaps the input needs to be a percentage?):
         # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/db/vasp_to_xml.py#L810        
     
-        seff = SolarEfficiency().slme(energies, absorption, dirgap, indirgap)
+        if not silent:
+            print("\nUsing the following parameters: ")
+            print(" Struct:       " + ID)
+            print(" Direct Gap:   " + str(dirgap))
+            print(" Indirect Gap: " + str(indirgap))
 
-        print(seff)
+        seff = SolarEfficiency().slme(energies, absorption, dirgap, indirgap) * 100
+
+        
+        if silent:
+            print(ID)
+            return seff
+        
+
+        print("\nSLME: " + str(seff) + "%")
+        print()
+
+        if self.METADATA == None:
+            print(Fore.RED + "Metadata missing" + Fore.RESET)
+        else:
+            print("Reference info: ")
+            try:
+                print(" Direct Gap:   " + str(self.METADATA[ID]["mbj_dir_gap"]))
+                print(" Indirect Gap: " + str(self.METADATA[ID]["mbj_indir_gap"]))
+            except KeyError:
+                print(" Direct Gap:   " + str(self.METADATA[ID]["dir_gap"]))
+                print(" Indirect Gap: " + str(self.METADATA[ID]["indir_gap"]))
+            print(" SLME:         " + str(self.METADATA[ID]["ref_slme"]) + "%")
+            print(" SQ:           " + str(self.METADATA[ID]["ref_sq"]) + "%")
+
+        
+        return seff
+
 
 
     def query(self, ID, model_type):
         match model_type:
             case "REAL":
                 model = self.MODEL_REAL
-                norm_div_loc = self.NORM_DIV_LOC_REAL
             case "IMAG":
                 model = self.MODEL_IMAG
-                norm_div_loc = self.NORM_DIV_LOC_IMAG
             case _:
-                print("Must select either 'REAL' or 'IMAG'")
+                print(Fore.RED + "Must select either 'REAL' or 'IMAG'" + Fore.RESET)
                 return None
         
         if model == None:
-            print("Must call load_models first")
+            print(Fore.RED + "Must call load_models first" + Fore.RESET)
             return None
         
         try:
             atoms = Atoms.from_poscar(ID)
         except FileNotFoundError:
             try:
-                atoms = Atoms.from_poscar(self.STRUCTURES_LOC + ID)
+                atoms = Atoms.from_poscar(os.path.join(self.STRUCTURES_LOC, ID))
             except FileNotFoundError:
-                print("Requested file not found")
+                print(Fore.RED + "Requested file not found" + Fore.RESET)
                 return None
         
         cvn = Spacegroup3D(atoms).conventional_standard_structure
-
-        try:
-            f = open(norm_div_loc, 'r')
-            norm_div = float(f.readlines()[0])
-            f.close()
-        except Exception:
-            norm_div = 1.0
         
         g, lg = Graph.atom_dgl_multigraph(atoms)
 
-        out = list(map(lambda x: x * norm_div, (model([g.to(self.DEVICE), lg.to(self.DEVICE)]))["out"].detach().cpu().numpy().flatten().tolist()))
+        out = list((model([g.to(self.DEVICE), lg.to(self.DEVICE)]))["out"].detach().cpu().numpy().flatten().tolist())
         
         return out
 
@@ -188,11 +334,29 @@ class CommandParser:
                     print("Incorrect arguments, see \"help\"")
                 else:
                     self.plotille_plot(cmpts[2], cmpts[1])
-            case "slme":
-                if len(cmpts) != 4:
+            case "automated_test":
+                if len(cmpts) != 3:
                     print("Incorrect arguments, see \"help\"")
                 else:
+                    self.automated_test(cmpts[1], cmpts[2])
+            case "slme":
+                if len(cmpts) != 4:
+                    if len(cmpts) != 2:
+                        print("Incorrect arguments, see \"help\"")
+                    else:
+                        self.slme(cmpts[1])
+                else:
                     self.slme(cmpts[1], float(cmpts[2]), float(cmpts[3]))
+            case "set_models":
+                if len(cmpts) != 3:
+                    print("Incorrect arguments, see \"help\"")
+                else:
+                    self.set_models(cmpts[1], cmpts[2])
+            case "set_data":
+                if len(cmpts) != 2:
+                    print("Incorrect arguments, see \"help\"")
+                else:
+                    self.set_data(cmpts[1])
             case _:
                 print("Command not found, use \"help\"")
 
@@ -203,14 +367,21 @@ class CommandParser:
         print("     Show this help info\n")
         print(Fore.RED + "  - quit" + Fore.RESET)
         print("     Quit the program\n")
+        print(Fore.RED + "  - set_models [real directory] [imaginary directory]" + Fore.RESET)
+        print("     Set the locations of the real and imaginary models\n")
+        print(Fore.RED + "  - set_data [data directory]" + Fore.RESET)
+        print("     Set the location of the data set to access\n")
         print(Fore.RED + "  - load_models" + Fore.RESET)
         print("     Load the checkpoints\n")
         print(Fore.RED + "  - plot [model_type] [ID]" + Fore.RESET)
         print("     Plot quickly with Plotille on terminal. model_type is either 'REAL' or 'IMAG'")
         print("     ID is the name of the structure file to evaluate for\n")
         print(Fore.RED + "  - slme [ID] [direct bandgap] [indirect bandgap]" + Fore.RESET)
-        print("     Plot quickly with Plotille on terminal. model_type is either 'REAL' or 'IMAG'")
+        print("     Compute the SLME with structure \"ID\", and the bandgaps")
         print("     ID is the name of the structure file to evaluate for\n")
+        print(Fore.RED + "  - automated_test [input text file] [output json]" + Fore.RESET)
+        print("     Compute the SLME of all test structs and compute errors")
+        print("     Prints the MAE and saves the computation information to output json\n")
 
     def start(self):
         while True:
@@ -239,6 +410,14 @@ class CommandParser:
                 traceback.print_exc()
                 exit(2)
 
+
+def MAE(A, B):
+    """Calculate the Mean Absolute Error of arrays A and B"""
+    total = 0
+    for i in range(0, len(A)):
+        total += abs(A[i] - B[i])
+    
+    return total / len(A)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+
+# Modified from https://github.com/usnistgov/alignn/blob/main/alignn/examples/sample_data/scripts/generate_sample_data_reg.py
+
+import numpy as np
+from jarvis.db.webpages import Webpage
+from jarvis.db.figshare import data
+from jarvis.core.atoms import Atoms
+from jarvis.core.spectrum import Spectrum
+
+import json
+
+
+new_dist = np.arange(0, 15, 0.05)
+
+SAMPLE_COUNT = int(input("How many samples to gather? : "))
+
+PART = input("Which component of the dielectric function? (i.e. real_xx) : ")
+
+D3D = data("dft_3d")
+
+valid_samples = []
+for i in D3D:
+    if i['mbj_bandgap'] != 'na' and float(i['mbj_bandgap']) > 0.15:
+        valid_samples.append(i)
+
+print("Pre-parsed valid insulators (" + str(len(valid_samples)) + ")")
+
+count = 0
+
+print("Parsing and collecting samples:\t 0%")
+
+# Progress info:
+threshold_offset = 1
+next_threshold = threshold_offset
+
+# Rejection counter
+reject_count = 0
+
+lines = []
+names = []
+
+max_value = -500.0
+
+
+metadata_dict = {}
+
+for sample in valid_samples:
+    w = Webpage(jid=sample['jid'])
+    try:
+        mbj_dielectric = w.get_dft_mbj_dielectric_function()
+    except KeyError:
+        print("Rejected " + sample['jid'] + ":\t Could not read dielectric function")
+        reject_count += 1
+        continue
+    s = Spectrum(x=mbj_dielectric['energies'], y=mbj_dielectric['imag_xx'])
+    interp = np.array(s.get_interpolated_values(new_dist=new_dist))
+
+
+    save_data = Spectrum(x=mbj_dielectric['energies'], y=mbj_dielectric[PART])
+    save_interp = np.array(save_data.get_interpolated_values(new_dist=new_dist))
+
+
+    max_value = max(max_value, interp.max())
+
+    if np.isnan(interp).any() or np.isnan(save_interp).any():
+        print("Rejected " + sample['jid'] + ":\t Dielectric function values NaN")
+        reject_count += 1
+        continue
+
+    if np.all(interp<0.1) or np.all(save_interp<0.1):
+        print("Rejected " + sample['jid'] + ":\t All dielectric function values less than 0.1")
+        reject_count += 1
+        continue
+    
+    rejected = False
+    for i in range(0, len(interp)):
+        if i * 0.05 < float(sample['mbj_bandgap']) and interp[i] > 5.0:
+            rejected = True
+    
+    if rejected:
+        print("Rejected " + sample['jid'] + ":\t Invalid imaginary behavior within bandgap")
+        reject_count += 1
+        continue
+
+    
+    try:
+        atoms = Atoms.from_dict(sample['atoms'])
+    except KeyError:
+        print("Rejected " + sample['jid'] + ":\t Could not construct atoms")
+        reject_count += 1
+        continue
+    name = 'POSCAR-' + sample['jid'] + '.vasp'
+    names.append(name)
+    atoms.write_poscar('./' + name)
+    lines.append(save_interp)
+    count += 1
+    if count == SAMPLE_COUNT:
+        break
+
+
+    # Gathering metadata
+    
+    D = w.to_dict()['basic_info']
+
+    mbj_dir_gap = float(D['main_optics_mbj']['main_optics_mbj_info']['opto_dir_gap'])
+    mbj_indir_gap = float(D['main_optics_mbj']['main_optics_mbj_info']['opto_indir_gap'])
+
+    ref_slme = float(D['main_optics_mbj']['main_optics_mbj_info']['solar_slme'])
+    ref_sq = float(D['main_optics_mbj']['main_optics_mbj_info']['solar_sq'])
+
+    metadata_dict[name] = {
+        'mbj_dir_gap' : mbj_dir_gap,
+        'mbj_indir_gap' : mbj_indir_gap,
+        'ref_slme' : ref_slme,
+        'ref_sq' : ref_sq
+    }
+
+
+
+
+    # Progress info:
+    progress = (count / SAMPLE_COUNT) * 100
+    if progress >= next_threshold:
+        print("Parsing and collecting samples:\t " + str(next_threshold) + "%")
+        next_threshold += threshold_offset
+
+print("Valid samples processed: " + str(count) + "/" + str(count + reject_count))
+print("Rejected samples: " + str(reject_count) + "/" + str(count + reject_count))
+
+print("Writing id_prop...")
+
+f = open('./id_prop.csv', 'w')
+
+for i in range(0, len(lines)):
+    f.write(names[i]+','+','.join(map(str, lines[i])) + '\n')
+
+f.close()
+
+print("id_prop done")
+
+
+print("Writing metadata.json...")
+
+with open('metadata.json', 'w') as meta_json:
+    json.dump(metadata_dict, meta_json)
+
+print("metadata.json done")
