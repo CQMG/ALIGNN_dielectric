@@ -1,0 +1,13 @@
+{
+    "model_loc": "output_data/",
+    "model_file": "best_model.pt",
+    "plot_loc": "plots/",
+    "cache_out": "cached_results/",
+    "test_loc": "test_files/",
+    "plotille_template": "{}:blue:_:dashed {}:red:?",
+    "img_templage": "{}:black:_:dashed {}:red:?",
+    "type": "imag",
+    "direction": "xx",
+    "data_loc": "../DATA_IMAG/",
+    "data": "../DATA_IMAG/"
+}

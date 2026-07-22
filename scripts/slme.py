@@ -281,11 +281,18 @@ class CommandParser:
         
         try:
             atoms = Atoms.from_poscar(ID)
+            print("Opened POSCAR")
         except FileNotFoundError:
             try:
                 atoms = Atoms.from_poscar(os.path.join(self.STRUCTURES_LOC, ID))
             except FileNotFoundError:
-                print(Fore.RED + "Requested file not found" + Fore.RESET)
+                print(Fore.RED + "Requested POSCAR file not found" + Fore.RESET)
+                return None
+        except Exception:
+            try:
+                atoms = Atoms.from_cif(os.path.join(self.STRUCTURES_LOC, ID))
+            except FileNotFoundError:
+                print(Fore.RED + "Requested CIF file not found" + Fore.RESET)
                 return None
         
         cvn = Spacegroup3D(atoms).conventional_standard_structure
