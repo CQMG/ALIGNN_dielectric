@@ -178,7 +178,7 @@ class CommandParser:
             raise
     
 
-    def slme(self, ID, dirgap=None, indirgap=None, silent=False):
+    def slme(self, ID, dirgap=None, indirgap=None, thickness=50e-6, silent=False):
         real = np.array(self.query(ID, "REAL"))
         imag = np.array(self.query(ID, "IMAG"))
 
@@ -236,7 +236,7 @@ class CommandParser:
             print(" Direct Gap:   " + str(dirgap))
             print(" Indirect Gap: " + str(indirgap))
 
-        seff = SolarEfficiency().slme(energies, absorption, dirgap, indirgap) * 100
+        seff = SolarEfficiency().slme(energies, absorption, dirgap, indirgap, thickness=thickness) * 100
 
         
         if silent:
@@ -340,13 +340,15 @@ class CommandParser:
                 else:
                     self.automated_test(cmpts[1], cmpts[2])
             case "slme":
-                if len(cmpts) != 4:
-                    if len(cmpts) != 2:
-                        print("Incorrect arguments, see \"help\"")
-                    else:
-                        self.slme(cmpts[1])
-                else:
+                if len(cmpts) == 5:
+                    self.slme(cmpts[1], float(cmpts[2]), float(cmpts[3]), float(cmpts[4]))
+                elif len(cmpts) == 4:
                     self.slme(cmpts[1], float(cmpts[2]), float(cmpts[3]))
+                elif len(cmpts) == 2:
+                    self.slme(cmpts[1])
+                else:
+                    print("Incorrect arguments, see \"help\"")
+
             case "set_models":
                 if len(cmpts) != 3:
                     print("Incorrect arguments, see \"help\"")
