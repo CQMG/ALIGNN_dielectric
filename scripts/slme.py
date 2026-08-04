@@ -22,6 +22,8 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
+from alignn.pretrained import get_prediction as get_pretrained_prediction
+
 
 class CommandParser:
     def __init__(self):
@@ -30,6 +32,8 @@ class CommandParser:
         self.REAL_DIR = os.path.join(".", "REAL")
         #self.IMAG_DIR = os.path.join("./", input("Imaginary model directory: "))
         self.IMAG_DIR = os.path.join(".", "IMAG")
+
+        self.GAPS_DIR = os.path.join(".", "GAPS_9000")
 
         self.DEFAULT_MODEL_LOC = True
 
@@ -53,30 +57,39 @@ class CommandParser:
 
         self.MODEL_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/best_model.pt")
         self.MODEL_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/best_model.pt")
+        self.MODEL_LOC_GAPS = os.path.join(self.GAPS_DIR, "output_data/best_model.pt")
 
         self.CONFIG_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/config.json")
         self.CONFIG_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/config.json")
+        self.CONFIG_LOC_GAPS = os.path.join(self.GAPS_DIR, "output_data/config.json")
 
         self.DEVICE = torch.device("cpu")
 
         self.MODEL_REAL = None
         self.MODEL_IMAG = None
+        self.MODEL_GAPS = None
+
+        self.FORCE_PREDICT_GAPS = False # Setting to force prediction of gaps, even if reference gaps exist
     
     def set_models(self, real_dir, imag_dir):
         self.REAL_DIR = os.path.join(".", real_dir)
         self.IMAG_DIR = os.path.join(".", imag_dir)
+        self.GAPS_DIR = os.path.join(".", imag_dir)
 
         self.MODEL_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/best_model.pt")
         self.MODEL_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/best_model.pt")
+        self.MODEL_LOC_GAPS = os.path.join(self.GAPS_DIR, "output_data/best_model.pt")
 
         self.CONFIG_LOC_REAL = os.path.join(self.REAL_DIR, "output_data/config.json")
         self.CONFIG_LOC_IMAG = os.path.join(self.IMAG_DIR, "output_data/config.json")
+        self.CONFIG_LOC_GAPS = os.path.join(self.GAPS_DIR, "output_data/config.json")
 
         self.DEFAULT_MODEL_LOC = False
         self.DEFAULT_STRUCT_LOC = False
 
         self.MODEL_REAL = None
         self.MODEL_IMAG = None
+        self.MODEL_GAPS = None
 
         print("Models switched, use load_models before attempting to query them\n")
     
@@ -86,6 +99,8 @@ class CommandParser:
         self.DEFAULT_STRUCT_LOC = False
 
         self.METADATA_LOC = os.path.join(self.STRUCTURES_LOC, "metadata.json")
+
+        self.METADATA = None
 
         try:
             with open(self.METADATA_LOC, 'r') as f:
@@ -102,9 +117,11 @@ class CommandParser:
 
         config_real = loadjson(self.CONFIG_LOC_REAL)
         config_imag = loadjson(self.CONFIG_LOC_IMAG)
+        config_gaps = loadjson(self.CONFIG_LOC_GAPS)
         
         self.MODEL_REAL = ALIGNNAtomWise(ALIGNNAtomWiseConfig(**config_real["model"]))
         self.MODEL_IMAG = ALIGNNAtomWise(ALIGNNAtomWiseConfig(**config_imag["model"]))
+        self.MODEL_GAPS = ALIGNNAtomWise(ALIGNNAtomWiseConfig(**config_gaps["model"]))
 
         self.MODEL_REAL.state_dict()
         self.MODEL_REAL.load_state_dict(torch.load(self.MODEL_LOC_REAL))
@@ -112,11 +129,16 @@ class CommandParser:
         self.MODEL_IMAG.state_dict()
         self.MODEL_IMAG.load_state_dict(torch.load(self.MODEL_LOC_IMAG))
 
+        self.MODEL_GAPS.state_dict()
+        self.MODEL_GAPS.load_state_dict(torch.load(self.MODEL_LOC_GAPS))
+
         self.MODEL_IMAG.to(self.DEVICE)
         self.MODEL_REAL.to(self.DEVICE)
+        self.MODEL_GAPS.to(self.DEVICE)
 
         self.MODEL_IMAG.eval()
         self.MODEL_REAL.eval()
+        self.MODEL_GAPS.eval()
 
         if self.DEFAULT_MODEL_LOC:
             print(Fore.RED + "WARNING: " + Fore.RESET + "Using the default models in './REAL' and './IMAG'")
@@ -142,10 +164,14 @@ class CommandParser:
         errors = []
 
         for struct in test_structs:
-            try:
-                seff = self.slme(struct, self.METADATA[struct]["mbj_dir_gap"], self.METADATA[struct]["mbj_indir_gap"], True)
-            except KeyError:
-                seff = self.slme(struct, self.METADATA[struct]["dir_gap"], self.METADATA[struct]["indir_gap"], True)
+            if self.FORCE_PREDICT_GAPS:
+                seff = self.slme(struct, None, None, silent=True)
+            else:
+                try:
+                    seff = self.slme(struct, self.METADATA[struct]["mbj_dir_gap"], self.METADATA[struct]["mbj_indir_gap"], silent=True)
+                except KeyError:
+                    seff = self.slme(struct, self.METADATA[struct]["dir_gap"], self.METADATA[struct]["indir_gap"], silent=True)
+
             real = self.query(struct, "REAL")
             imag = self.query(struct, "IMAG")
             
@@ -184,22 +210,46 @@ class CommandParser:
 
         if dirgap == None:
             if self.METADATA == None:
-                print("Missing metadata, either provide valid metadata or specify bandgaps directly")
-                return None
-            try:
-                dirgap = self.METADATA[ID]["mbj_dir_gap"]
-            except KeyError:
-                dirgap = self.METADATA[ID]["dir_gap"]
+                print("Missing metadata, either provide valid metadata or specify bandgaps directly to use computed bandgaps instead of predicted ones")
+                dirgap = None
+            else:
+                try:
+                    dirgap = self.METADATA[ID]["mbj_dir_gap"]
+                except KeyError:
+                    dirgap = self.METADATA[ID]["dir_gap"]
 
         if indirgap == None:
             if self.METADATA == None:
-                print("Missing metadata, either provide valid metadata or specify bandgaps directly")
-                return None
-            try:
-                indirgap = self.METADATA[ID]["mbj_indir_gap"]
-            except KeyError:
-                indirgap = self.METADATA[ID]["indir_gap"]
+                print("Missing metadata, either provide valid metadata or specify bandgaps directly to use computed bandgaps instead of predicted ones")
+                indirgap = None
+            else:
+                try:
+                    indirgap = self.METADATA[ID]["mbj_indir_gap"]
+                except KeyError:
+                    indirgap = self.METADATA[ID]["indir_gap"]
 
+        if dirgap == None or indirgap == None or self.FORCE_PREDICT_GAPS:
+            print("Querying model for TB-mBJ bandgaps...")
+            try:
+                atoms = Atoms.from_poscar(ID)
+                print("Opened POSCAR")
+            except FileNotFoundError:
+                try:
+                    atoms = Atoms.from_poscar(os.path.join(self.STRUCTURES_LOC, ID))
+                except FileNotFoundError:
+                    print(Fore.RED + "Requested POSCAR file not found" + Fore.RESET)
+                    return None
+            except Exception:
+                try:
+                    atoms = Atoms.from_cif(os.path.join(self.STRUCTURES_LOC, ID))
+                except FileNotFoundError:
+                    print(Fore.RED + "Requested CIF file not found" + Fore.RESET)
+                    return None
+            result = self.query_gaps(ID)
+
+            dirgap, indirgap = result[0], result[1]
+
+            print(result)
 
         # Modified from:
         # https://github.com/usnistgov/jarvis/blob/52eb756d1a5512779502bb6cec564af2fd322c6a/jarvis/io/vasp/outputs.py#L1499-L1501
@@ -263,6 +313,18 @@ class CommandParser:
         
         return seff
 
+    def query_gaps(self, ID):
+        dat = self.query(ID, "GAPS")
+
+        return (dat[0], dat[1])
+
+    def gaps(self, ID):
+        gaps = self.query_gaps(ID)
+
+        print(f"Predicted Direct Gap:   {gaps[0]}")
+        print(f"Predicted Indirect Gap: {gaps[1]}")
+
+        return gaps
 
 
     def query(self, ID, model_type):
@@ -271,8 +333,10 @@ class CommandParser:
                 model = self.MODEL_REAL
             case "IMAG":
                 model = self.MODEL_IMAG
+            case "GAPS":
+                model = self.MODEL_GAPS
             case _:
-                print(Fore.RED + "Must select either 'REAL' or 'IMAG'" + Fore.RESET)
+                print(Fore.RED + "Must select 'REAL', 'IMAG', or 'GAPS'" + Fore.RESET)
                 return None
         
         if model == None:
@@ -346,6 +410,11 @@ class CommandParser:
                     print("Incorrect arguments, see \"help\"")
                 else:
                     self.automated_test(cmpts[1], cmpts[2])
+            case "gaps":
+                if len(cmpts) != 2:
+                    print("Incorrect arguments, see \"help\"")
+                else:
+                    self.gaps(cmpts[1])
             case "slme":
                 if len(cmpts) == 5:
                     self.slme(cmpts[1], float(cmpts[2]), float(cmpts[3]), float(cmpts[4]))
@@ -366,6 +435,17 @@ class CommandParser:
                     print("Incorrect arguments, see \"help\"")
                 else:
                     self.set_data(cmpts[1])
+            case "force_predict_gaps":
+                if len(cmpts) != 2:
+                    print("Incorrect arguments, see \"help\"")
+                else:
+                    match cmpts[1].lower():
+                        case "true":
+                            self.FORCE_PREDICT_GAPS = True
+                        case "false":
+                            self.FORCE_PREDICT_GAPS = False
+                        case _:
+                            print("Incorrect arguments, see \"help\"")
             case _:
                 print("Command not found, use \"help\"")
 
@@ -385,12 +465,17 @@ class CommandParser:
         print(Fore.RED + "  - plot [model_type] [ID]" + Fore.RESET)
         print("     Plot quickly with Plotille on terminal. model_type is either 'REAL' or 'IMAG'")
         print("     ID is the name of the structure file to evaluate for\n")
+        print(Fore.RED + "  - gaps [ID]" + Fore.RESET)
+        print("     Predict the direct and indirect bandgaps of a structure")
         print(Fore.RED + "  - slme [ID] [direct bandgap] [indirect bandgap]" + Fore.RESET)
         print("     Compute the SLME with structure \"ID\", and the bandgaps")
         print("     ID is the name of the structure file to evaluate for\n")
         print(Fore.RED + "  - automated_test [input text file] [output json]" + Fore.RESET)
         print("     Compute the SLME of all test structs and compute errors")
         print("     Prints the MAE and saves the computation information to output json\n")
+        print(Fore.RED + "  - force_predict_gaps [true/false]" + Fore.RESET)
+        print("     Global setting for whether to force using predicted bandgaps in SLME calls.")
+        print("     Also applies in automated testing")
 
     def start(self):
         while True:
